@@ -4,8 +4,8 @@
 
 use session::Buf;
 
-use crate::*;
 use crate::protocol::*;
+use crate::*;
 
 pub(crate) async fn handle_memcache_client(
     mut socket: tokio::net::TcpStream,
