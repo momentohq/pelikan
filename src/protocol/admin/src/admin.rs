@@ -9,7 +9,7 @@
 
 use crate::*;
 use common::bytes::SliceExtension;
-use rustcommon_metrics::*;
+use metriken::*;
 
 use std::io::{Error, ErrorKind, Result};
 
@@ -123,7 +123,7 @@ impl Compose for AdminResponse {
             Self::Stats => {
                 let mut size = 0;
                 let mut data = Vec::new();
-                for metric in &rustcommon_metrics::metrics() {
+                for metric in &metriken::metrics() {
                     let any = match metric.as_any() {
                         Some(any) => any,
                         None => {
@@ -137,14 +137,14 @@ impl Compose for AdminResponse {
                         data.push(format!("STAT {} {}\r\n", metric.name(), gauge.value()));
                     } else if let Some(heatmap) = any.downcast_ref::<Heatmap>() {
                         for (label, value) in PERCENTILES {
-                            let percentile =
-                                heatmap.percentile(*value).map(|b| b.high()).unwrap_or(0);
-                            data.push(format!(
-                                "STAT {}_{} {}\r\n",
-                                metric.name(),
-                                label,
-                                percentile
-                            ));
+                            if let Some(Ok(bucket)) = heatmap.percentile(*value) {
+                                data.push(format!(
+                                    "STAT {}_{} {}\r\n",
+                                    metric.name(),
+                                    label,
+                                    bucket.high()
+                                ));
+                            }
                         }
                     }
                 }

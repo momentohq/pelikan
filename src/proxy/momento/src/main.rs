@@ -6,22 +6,18 @@
 extern crate logger;
 
 use backtrace::Backtrace;
-use clap::{App, Arg};
+use clap::{Arg, Command};
 use config::momento_proxy::Protocol;
 use config::*;
-use core::num::NonZeroU64;
 use core::num::NonZeroUsize;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use core::time::Duration;
 use logger::configure_logging;
 use logger::Drain;
-use momento::response::cache_get_response::*;
-use momento::response::cache_set_response::*;
-use momento::response::error::*;
-use momento::simple_cache_client::*;
+use metriken::*;
+use momento::*;
 use net::TCP_RECV_BYTE;
 use protocol_admin::*;
-use rustcommon_metrics::*;
 use session::*;
 use std::borrow::{Borrow, BorrowMut};
 use std::io::{Error, ErrorKind};
@@ -30,6 +26,8 @@ use tokio::net::TcpListener;
 use tokio::runtime::Builder;
 use tokio::time::timeout;
 
+use crate::error::{ProxyError, ProxyResult};
+
 pub const KB: usize = 1024;
 pub const MB: usize = 1024 * KB;
 
@@ -37,6 +35,7 @@ const S: u64 = 1_000_000_000; // one second in nanoseconds
 const US: u64 = 1_000; // one microsecond in nanoseconds
 
 mod admin;
+mod error;
 mod frontend;
 mod klog;
 mod listener;
@@ -63,7 +62,13 @@ pub const MAX_REQUEST_SIZE: usize = 100 * MB;
 // The Momento cache client requires providing a default TTL. For the current
 // implementation of the proxy, we don't actually let the client use the default,
 // we always specify a TTL for each `set`.
-const DEFAULT_TTL_SECONDS: NonZeroU64 = unsafe { NonZeroU64::new_unchecked(3600) };
+const DEFAULT_TTL: Duration = Duration::from_secs(3600);
+
+/// Default collection TTL policy used on collection operations.
+///
+/// Basically, we use the DEFAULT_TTL above and never update the TTL of the
+/// item within the momento cache.
+const COLLECTION_TTL: CollectionTtl = CollectionTtl::new(None, false);
 
 // we interpret TTLs the same way memcached would
 pub const TIME_TYPE: TimeType = TimeType::Memcache;
@@ -78,30 +83,71 @@ pub static PERCENTILES: &[(&str, f64)] = &[
     ("p9999", 99.99),
 ];
 
-counter!(ADMIN_REQUEST_PARSE);
-counter!(ADMIN_RESPONSE_COMPOSE);
+#[metric(name = "admin_request_parse")]
+pub static ADMIN_REQUEST_PARSE: Counter = Counter::new();
 
-counter!(BACKEND_REQUEST);
-counter!(BACKEND_EX);
-counter!(BACKEND_EX_RATE_LIMITED);
-counter!(BACKEND_EX_TIMEOUT);
+#[metric(name = "admin_response_compose")]
+pub static ADMIN_RESPONSE_COMPOSE: Counter = Counter::new();
 
-counter!(RU_UTIME);
-counter!(RU_STIME);
-gauge!(RU_MAXRSS);
-gauge!(RU_IXRSS);
-gauge!(RU_IDRSS);
-gauge!(RU_ISRSS);
-counter!(RU_MINFLT);
-counter!(RU_MAJFLT);
-counter!(RU_NSWAP);
-counter!(RU_INBLOCK);
-counter!(RU_OUBLOCK);
-counter!(RU_MSGSND);
-counter!(RU_MSGRCV);
-counter!(RU_NSIGNALS);
-counter!(RU_NVCSW);
-counter!(RU_NIVCSW);
+#[metric(name = "backend_request")]
+pub static BACKEND_REQUEST: Counter = Counter::new();
+
+#[metric(name = "backend_ex")]
+pub static BACKEND_EX: Counter = Counter::new();
+
+#[metric(name = "backend_ex_rate_limited")]
+pub static BACKEND_EX_RATE_LIMITED: Counter = Counter::new();
+
+#[metric(name = "backend_ex_timeout")]
+pub static BACKEND_EX_TIMEOUT: Counter = Counter::new();
+
+#[metric(name = "ru_utime")]
+pub static RU_UTIME: Counter = Counter::new();
+
+#[metric(name = "ru_stime")]
+pub static RU_STIME: Counter = Counter::new();
+
+#[metric(name = "ru_maxrss")]
+pub static RU_MAXRSS: Gauge = Gauge::new();
+
+#[metric(name = "ru_ixrss")]
+pub static RU_IXRSS: Gauge = Gauge::new();
+
+#[metric(name = "ru_idrss")]
+pub static RU_IDRSS: Gauge = Gauge::new();
+
+#[metric(name = "ru_isrss")]
+pub static RU_ISRSS: Gauge = Gauge::new();
+
+#[metric(name = "ru_minflt")]
+pub static RU_MINFLT: Counter = Counter::new();
+
+#[metric(name = "ru_majflt")]
+pub static RU_MAJFLT: Counter = Counter::new();
+
+#[metric(name = "ru_nswap")]
+pub static RU_NSWAP: Counter = Counter::new();
+
+#[metric(name = "ru_inblock")]
+pub static RU_INBLOCK: Counter = Counter::new();
+
+#[metric(name = "ru_oublock")]
+pub static RU_OUBLOCK: Counter = Counter::new();
+
+#[metric(name = "ru_msgsnd")]
+pub static RU_MSGSND: Counter = Counter::new();
+
+#[metric(name = "ru_msgrcv")]
+pub static RU_MSGRCV: Counter = Counter::new();
+
+#[metric(name = "ru_nsignals")]
+pub static RU_NSIGNALS: Counter = Counter::new();
+
+#[metric(name = "ru_nvcsw")]
+pub static RU_NVCSW: Counter = Counter::new();
+
+#[metric(name = "ru_nivcsw")]
+pub static RU_NIVCSW: Counter = Counter::new();
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // custom panic hook to terminate whole process after unwinding
@@ -112,9 +158,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }));
 
     // parse command line options
-    let matches = App::new(env!("CARGO_BIN_NAME"))
+    let matches = Command::new(env!("CARGO_BIN_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
-        .version_short("v")
+        // .version_short("v")
         .long_about(
             "A proxy that supports a limited subset of the Memcache protocol on
             the client side and communicates with Momento over gRPC to fulfill
@@ -126,25 +172,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             The supported commands are limited to: get/set",
         )
         .arg(
-            Arg::with_name("stats")
-                .short("s")
+            Arg::new("stats")
+                .short('s')
                 .long("stats")
                 .help("List all metrics in stats")
-                .takes_value(false),
+                .action(clap::ArgAction::SetTrue),
         )
         .arg(
-            Arg::with_name("CONFIG")
+            Arg::new("CONFIG")
                 .help("Server configuration file")
+                .action(clap::ArgAction::Set)
                 .index(1),
         )
         .get_matches();
 
     // load config from file
-    let config = if let Some(file) = matches.value_of("CONFIG") {
+    let config = if let Some(file) = matches.get_one::<String>("CONFIG") {
         match MomentoProxyConfig::load(file) {
             Ok(c) => c,
             Err(e) => {
-                println!("{}", e);
+                println!("{e}");
                 std::process::exit(1);
             }
         }
@@ -158,9 +205,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // validate config parameters
     for cache in config.caches() {
         let name = cache.cache_name();
-        let ttl = cache.default_ttl();
+        let ttl = cache
+            .default_ttl()
+            .as_micros()
+            .try_into()
+            .unwrap_or(u64::MAX);
         let limit = u64::MAX / 1000;
-        if ttl.get() > limit {
+        if ttl > limit {
             error!("default ttl of {ttl} for cache `{name}` is greater than {limit}");
             let _ = log_drain.flush();
             std::process::exit(1);
@@ -177,12 +228,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     common::metrics::init();
 
     // output stats descriptions and exit if the `stats` option was provided
-    if matches.is_present("stats") {
+    if matches.get_flag("stats") {
         println!("{:<31} {:<15} DESCRIPTION", "NAME", "TYPE");
 
         let mut metrics = Vec::new();
 
-        for metric in &rustcommon_metrics::metrics() {
+        for metric in &metriken::metrics() {
             let any = match metric.as_any() {
                 Some(any) => any,
                 None => {
@@ -197,7 +248,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             } else if any.downcast_ref::<Heatmap>().is_some() {
                 for (label, _) in PERCENTILES {
                     let name = format!("{}_{}", metric.name(), label);
-                    metrics.push(format!("{:<31} percentile", name));
+                    metrics.push(format!("{name:<31} percentile"));
                 }
             } else {
                 continue;
@@ -206,7 +257,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         metrics.sort();
         for metric in metrics {
-            println!("{}", metric);
+            println!("{metric}");
         }
         std::process::exit(0);
     }
@@ -216,7 +267,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     runtime.thread_name_fn(|| {
         static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
         let id = ATOMIC_ID.fetch_add(1, Ordering::SeqCst);
-        format!("pelikan_wrk_{}", id)
+        format!("pelikan_wrk_{id}")
     });
 
     if let Some(threads) = config.threads() {
@@ -244,17 +295,21 @@ async fn spawn(
 
     // initialize the Momento cache client
     if std::env::var("MOMENTO_AUTHENTICATION").is_err() {
-        error!("environment variable `MOMENTO_AUTHENTICATION` is not set");
-        let _ = log_drain.flush();
+        eprintln!("environment variable `MOMENTO_AUTHENTICATION` is not set");
         std::process::exit(1);
     }
     let auth_token =
         std::env::var("MOMENTO_AUTHENTICATION").expect("MOMENTO_AUTHENTICATION must be set");
-    let client_builder = match SimpleCacheClientBuilder::new(auth_token, DEFAULT_TTL_SECONDS) {
+    let credential_provider = CredentialProviderBuilder::from_string(auth_token)
+        .build()
+        .unwrap_or_else(|e| {
+            eprintln!("failed to initialize credential provider. error: {e}");
+            std::process::exit(1);
+        });
+    let client_builder = match SimpleCacheClientBuilder::new(credential_provider, DEFAULT_TTL) {
         Ok(c) => c,
         Err(e) => {
-            error!("could not create cache client: {}", e);
-            let _ = log_drain.flush();
+            eprintln!("could not create cache client: {}", e);
             std::process::exit(1);
         }
     };
@@ -284,7 +339,7 @@ async fn spawn(
         };
         let ttl = cache.default_ttl();
 
-        let tcp_listener = match std::net::TcpListener::bind(&addr) {
+        let tcp_listener = match std::net::TcpListener::bind(addr) {
             Ok(v) => {
                 if let Err(e) = v.set_nonblocking(true) {
                     error!(
@@ -311,9 +366,7 @@ async fn spawn(
         };
 
         tokio::spawn(async move {
-            let client_builder = client_builder
-                .default_ttl_seconds(ttl)
-                .expect("bad default ttl");
+            let client_builder = client_builder.default_ttl(ttl).expect("bad default ttl");
 
             info!(
                 "starting proxy frontend listener for cache `{}` on: {}",

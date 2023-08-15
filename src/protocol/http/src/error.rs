@@ -30,24 +30,19 @@ impl Error {
             Self::Unparseable(e) => Response::builder(400)
                 .should_close(true)
                 .header("Content-Type", b"text/plain")
-                .body(format!("Unable to parse request: {}", e).as_bytes()),
+                .body(format!("Unable to parse request: {e}").as_bytes()),
             Self::BadRequestMethod => Response::builder(405)
                 .should_close(true)
                 .header("Content-Type", b"text/plain")
-                .body(
-                    format!("Unsupported method, only GET, PUT, and DELETE are supported")
-                        .as_bytes(),
-                ),
+                .body(b"Unsupported method, only GET, PUT, and DELETE are supported"),
             Self::BadContentLength => Response::builder(400)
                 .should_close(true)
                 .header("Content-Type", b"text/plain")
-                .body(format!("Content-Length header was invalid").as_bytes()),
+                .body("Content-Length header was invalid".to_string().as_bytes()),
             Self::MissingContentLength => Response::builder(411)
                 .should_close(true)
                 .header("Content-Type", b"text/plain")
-                .body(
-                    format!("A Content-Length header is required for all PUT requests").as_bytes(),
-                ),
+                .body(b"A Content-Length header is required for all PUT requests"),
             Self::InternalError(message) => Response::builder(500)
                 .should_close(true)
                 .header("Content-Type", b"text/plain")

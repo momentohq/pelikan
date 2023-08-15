@@ -4,17 +4,20 @@
 
 //! A protocol crate for Thrift binary protocol.
 
+use metriken::*;
 use protocol_common::BufMut;
 use protocol_common::Compose;
 use protocol_common::Parse;
 use protocol_common::ParseOk;
-use rustcommon_metrics::*;
 
 const THRIFT_HEADER_LEN: usize = std::mem::size_of::<u32>();
 
 // Stats
-counter!(MESSAGES_PARSED);
-counter!(MESSAGES_COMPOSED);
+#[metric(name = "messages_parsed")]
+pub static MESSAGES_PARSED: Counter = Counter::new();
+
+#[metric(name = "messages_composed")]
+pub static MESSAGES_COMPOSED: Counter = Counter::new();
 
 /// An opaque Thrift message
 pub struct Message {

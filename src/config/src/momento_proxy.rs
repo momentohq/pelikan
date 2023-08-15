@@ -2,6 +2,7 @@ use crate::{Admin, AdminConfig, Debug, DebugConfig, Klog, KlogConfig};
 use core::num::NonZeroU64;
 use std::net::AddrParseError;
 use std::net::SocketAddr;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -75,8 +76,8 @@ impl Cache {
     }
 
     /// The default TTL (in seconds) for
-    pub fn default_ttl(&self) -> NonZeroU64 {
-        self.default_ttl
+    pub fn default_ttl(&self) -> Duration {
+        Duration::from_secs(self.default_ttl.get())
     }
 
     pub fn protocol(&self) -> Protocol {
@@ -93,7 +94,7 @@ impl MomentoProxyConfig {
         match toml::from_str(&content) {
             Ok(t) => Ok(t),
             Err(e) => {
-                eprintln!("{}", e);
+                eprintln!("{e}");
                 Err(std::io::Error::new(
                     std::io::ErrorKind::Other,
                     "Error parsing config",

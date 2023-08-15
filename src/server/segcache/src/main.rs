@@ -16,10 +16,10 @@
 extern crate logger;
 
 use backtrace::Backtrace;
-use clap::{App, Arg};
+use clap::{Arg, Command};
 use config::SegcacheConfig;
+use metriken::*;
 use pelikan_segcache_rs::Segcache;
-use rustcommon_metrics::*;
 use server::PERCENTILES;
 
 /// The entry point into the running Segcache instance. This function parses the
@@ -28,15 +28,14 @@ use server::PERCENTILES;
 fn main() {
     // custom panic hook to terminate whole process after unwinding
     std::panic::set_hook(Box::new(|s| {
-        eprintln!("{}", s);
+        eprintln!("{s}");
         eprintln!("{:?}", Backtrace::new());
         std::process::exit(101);
     }));
 
     // parse command line options
-    let matches = App::new(env!("CARGO_BIN_NAME"))
+    let matches = Command::new(env!("CARGO_BIN_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
-        .version_short("v")
         .long_about(
             "One of the unified cache backends implemented in Rust. It \
             uses segment-based storage to cache key/val pairs. It speaks the \
@@ -44,32 +43,34 @@ fn main() {
             commands.",
         )
         .arg(
-            Arg::with_name("stats")
-                .short("s")
+            Arg::new("stats")
+                .short('s')
                 .long("stats")
                 .help("List all metrics in stats")
-                .takes_value(false),
+                .action(clap::ArgAction::SetTrue),
         )
         .arg(
-            Arg::with_name("CONFIG")
+            Arg::new("CONFIG")
                 .help("Server configuration file")
+                .action(clap::ArgAction::Set)
                 .index(1),
         )
         .arg(
-            Arg::with_name("print-config")
-                .help("List all options in config")
+            Arg::new("print-config")
+                .short('c')
                 .long("config")
-                .short("c"),
+                .help("List all options in config")
+                .action(clap::ArgAction::SetTrue),
         )
         .get_matches();
 
     // output stats descriptions and exit if the `stats` option was provided
-    if matches.is_present("stats") {
+    if matches.get_flag("stats") {
         println!("{:<31} {:<15} DESCRIPTION", "NAME", "TYPE");
 
         let mut metrics = Vec::new();
 
-        for metric in &rustcommon_metrics::metrics() {
+        for metric in &metriken::metrics() {
             let any = match metric.as_any() {
                 Some(any) => any,
                 None => {
@@ -84,7 +85,7 @@ fn main() {
             } else if any.downcast_ref::<Heatmap>().is_some() {
                 for (label, _) in PERCENTILES {
                     let name = format!("{}_{}", metric.name(), label);
-                    metrics.push(format!("{:<31} percentile", name));
+                    metrics.push(format!("{name:<31} percentile"));
                 }
             } else {
                 continue;
@@ -93,13 +94,13 @@ fn main() {
 
         metrics.sort();
         for metric in metrics {
-            println!("{}", metric);
+            println!("{metric}");
         }
         std::process::exit(0);
     }
 
     // load config from file
-    let config = if let Some(file) = matches.value_of("CONFIG") {
+    let config = if let Some(file) = matches.get_one::<String>("CONFIG") {
         debug!("loading config: {}", file);
         match SegcacheConfig::load(file) {
             Ok(c) => c,
@@ -112,7 +113,7 @@ fn main() {
         Default::default()
     };
 
-    if matches.is_present("print-config") {
+    if matches.get_flag("print-config") {
         config.print();
         std::process::exit(0);
     }
@@ -121,7 +122,7 @@ fn main() {
     match Segcache::new(config) {
         Ok(segcache) => segcache.wait(),
         Err(e) => {
-            eprintln!("error launching segcache: {}", e);
+            eprintln!("error launching segcache: {e}");
             std::process::exit(1);
         }
     }

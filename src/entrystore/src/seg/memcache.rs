@@ -8,6 +8,7 @@
 use super::*;
 use protocol_common::*;
 
+use protocol_memcache::Value;
 use protocol_memcache::*;
 
 use std::time::Duration;
@@ -48,7 +49,7 @@ impl Storage for Seg {
                             item.key(),
                             flags,
                             None,
-                            format!("{}", v).as_bytes(),
+                            format!("{v}").as_bytes(),
                         ));
                     }
                 }
@@ -74,7 +75,7 @@ impl Storage for Seg {
                             item.key(),
                             flags,
                             Some(item.cas().into()),
-                            format!("{}", v).as_bytes(),
+                            format!("{v}").as_bytes(),
                         ));
                     }
                 }
@@ -285,19 +286,34 @@ impl Storage for Seg {
     }
 
     fn cas(&mut self, cas: &Cas) -> Response {
-        // duration of zero is treated as no expiry. as we have
-        // no way of checking the cas value without performing a cas
-        // and checking the result, setting the shortest possible ttl
-        // results in nearly immediate expiry
-        let ttl = cas.ttl().get().unwrap_or(1);
+        // TTL of None means that it doesn't expire. In `Seg` storage
+        // a TTL of zero maps to the longest TTL representable which
+        // is ~97 days.
+
+        let ttl = cas.ttl().get().unwrap_or(0);
+
+        // Since we allow specifying Unix timestamps as TTLs, we can actually
+        // make a request that says that if the CAS value matches, the item
+        // should be immediately expired.
+        //
+        // However, we cannot check the CAS value without attempting to store,
+        // and we can't store items that are already expired.
+        //
+        // As a hack, we will first attempt the CAS with a near immediate
+        // expiration (shortest possible is 1 second). On success we can delete
+        // the item so that subsequent reads cannot return an item that
+        // should've already been expired.
+
+        let mut delete_after = false;
 
         let ttl = if ttl < 0 {
-            Duration::from_secs(0)
+            delete_after = true;
+            Duration::from_secs(1)
         } else {
             Duration::from_secs(ttl as u64)
         };
 
-        if let Ok(s) = std::str::from_utf8(cas.value()) {
+        let response = if let Ok(s) = std::str::from_utf8(cas.value()) {
             if let Ok(v) = s.parse::<u64>() {
                 match self.data.cas(
                     cas.key(),
@@ -338,7 +354,17 @@ impl Storage for Seg {
                 Err(SegError::Exists) => Response::exists(cas.noreply()),
                 Err(_) => Response::error(),
             }
+        };
+
+        // If CAS was successful and TTL was in the past, we now delete the
+        // item.
+        if delete_after {
+            if let Response::Stored(_) = response {
+                self.data.delete(cas.key());
+            }
         }
+
+        response
     }
 
     fn delete(&mut self, delete: &Delete) -> Response {

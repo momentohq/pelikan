@@ -1,7 +1,7 @@
 [package]
 name = "seg"
 description = "segment-structured in-memory storage with eager expiration"
-authors = ["Brian Martin <bmartin@twitter.com>"]
+authors = ["Brian Martin <brian@pelikan.io>"]
 
 version = { workspace = true }
 edition = { workspace = true }
@@ -27,14 +27,13 @@ default = []
 
 [dependencies]
 ahash = { workspace = true }
-common = { path = "../../common" }
-datapool = { path = "../datapool" }
-logger = { path = "../../logger" }
-memmap2 = { workspace = true }
+clocksource = { workspace = true }
+datatier = { path = "../datatier" }
+metriken = { workspace = true }
 rand = { workspace = true , features = ["small_rng", "getrandom"] }
 rand_chacha = { workspace = true }
 rand_xoshiro = { workspace = true }
-rustcommon-metrics = { workspace = true }
+ringlog = { workspace = true }
 storage-types = { path = "../types" }
 thiserror = { workspace = true }
 

@@ -9,7 +9,7 @@
 extern crate logger;
 
 #[macro_use]
-extern crate rustcommon_metrics;
+extern crate metriken;
 
 use ::net::event::{Event, Source};
 use ::net::*;
@@ -23,16 +23,15 @@ use core::time::Duration;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use entrystore::EntryStore;
 use logger::Drain;
+use metriken::*;
 use protocol_common::{Compose, Execute, Parse};
-use queues::Queues;
-use rustcommon_metrics::*;
 use session::{Buf, ServerSession, Session};
 use slab::Slab;
 use std::io::{Error, ErrorKind, Result};
 use std::sync::Arc;
-use waker::Waker;
+use switchboard::{Queues, Waker};
 
-type Instant = rustcommon_metrics::time::Instant<rustcommon_metrics::time::Nanoseconds<u64>>;
+type Instant = clocksource::Instant<clocksource::Nanoseconds<u64>>;
 
 mod backend;
 mod frontend;
