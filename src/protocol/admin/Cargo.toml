@@ -1,7 +1,7 @@
 [package]
 name = "protocol-admin"
 description = "Admin ASCII protocol used in Pelikan servers"
-authors = ["Brian Martin <bmartin@twitter.com>"]
+authors = ["Brian Martin <brian@pelikan.io>"]
 
 version = { workspace = true }
 edition = { workspace = true }
@@ -13,8 +13,8 @@ license = { workspace = true }
 common = { path = "../../common" }
 config = { path = "../../config" }
 logger = { path = "../../logger" }
+metriken = { workspace = true }
 protocol-common = { path = "../../protocol/common" }
-rustcommon-metrics = { workspace = true }
 storage-types = { path = "../../storage/types" }
 
 [dev-dependencies]

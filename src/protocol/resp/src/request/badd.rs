@@ -6,19 +6,23 @@ use super::*;
 use std::io::{Error, ErrorKind};
 use std::sync::Arc;
 
-type ArcByteSlice = Arc<Box<[u8]>>;
-type ArcKeyValuePair = (ArcByteSlice, ArcByteSlice);
-
 /// Represents the btree add command which was added to Twitter's internal
 /// version of redis32.
 /// format is: badd outer_key (inner_key value)+
 #[derive(Debug, PartialEq, Eq)]
-pub struct BAddRequest {
-    outer_key: Arc<Box<[u8]>>,
-    inner_key_value_pairs: Arc<Box<[ArcKeyValuePair]>>,
+pub struct BtreeAdd {
+    outer_key: Arc<[u8]>,
+    inner_key_value_pairs: Box<[FieldValuePair]>,
 }
 
-impl BAddRequest {
+impl BtreeAdd {
+    pub fn new(outer_key: Arc<[u8]>, inner_key_value_pairs: Box<[FieldValuePair]>) -> Self {
+        Self {
+            outer_key,
+            inner_key_value_pairs,
+        }
+    }
+
     pub fn outer_key(&self) -> &[u8] {
         &self.outer_key
     }
@@ -26,13 +30,13 @@ impl BAddRequest {
     pub fn inner_key_value_pairs(&self) -> Box<[(&[u8], &[u8])]> {
         self.inner_key_value_pairs
             .iter()
-            .map(|(k, v)| (&***k, &***v))
+            .map(|(k, v)| (&**k, &**v))
             .collect::<Vec<(&[u8], &[u8])>>()
             .into_boxed_slice()
     }
 }
 
-impl TryFrom<Message> for BAddRequest {
+impl TryFrom<Message> for BtreeAdd {
     type Error = Error;
 
     fn try_from(other: Message) -> Result<Self, Error> {
@@ -95,7 +99,7 @@ impl TryFrom<Message> for BAddRequest {
 
             Ok(Self {
                 outer_key,
-                inner_key_value_pairs: Arc::new(Box::<[ArcKeyValuePair]>::from(pairs)),
+                inner_key_value_pairs: pairs.into(),
             })
         } else {
             Err(Error::new(ErrorKind::Other, "malformed command"))
@@ -103,8 +107,8 @@ impl TryFrom<Message> for BAddRequest {
     }
 }
 
-impl From<&BAddRequest> for Message {
-    fn from(other: &BAddRequest) -> Message {
+impl From<&BtreeAdd> for Message {
+    fn from(other: &BtreeAdd) -> Message {
         let mut v = vec![
             Message::bulk_string(b"BADD"),
             Message::BulkString(BulkString::from(other.outer_key.clone())),
@@ -118,7 +122,7 @@ impl From<&BAddRequest> for Message {
     }
 }
 
-impl Compose for BAddRequest {
+impl Compose for BtreeAdd {
     fn compose(&self, buf: &mut dyn BufMut) -> usize {
         let message = Message::from(self);
         message.compose(buf)
@@ -134,7 +138,7 @@ mod tests {
         let parser = RequestParser::new();
 
         //1 key value pair
-        if let Request::BAdd(request) = parser
+        if let Request::BtreeAdd(request) = parser
             .parse(b"badd outer inner 42\r\n")
             .unwrap()
             .into_inner()
@@ -148,7 +152,7 @@ mod tests {
         }
 
         //> 1 key value pairs
-        if let Request::BAdd(request) = parser
+        if let Request::BtreeAdd(request) = parser
             .parse(b"badd outer inner 42 inner2 7*6\r\n")
             .unwrap()
             .into_inner()

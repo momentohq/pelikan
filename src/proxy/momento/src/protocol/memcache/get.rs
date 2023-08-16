@@ -2,9 +2,10 @@
 // Licensed under the Apache License, Version 2.0
 // http://www.apache.org/licenses/LICENSE-2.0
 
-use crate::klog::klog_get;
+use crate::klog::{klog_1, Status};
 use crate::{Error, *};
 use ::net::*;
+use momento::response::Get as GetResponse;
 use protocol_memcache::*;
 
 pub async fn get(
@@ -30,59 +31,62 @@ pub async fn get(
     for key in keys {
         BACKEND_REQUEST.increment();
 
-        // we've already checked the keys, so we
-        // know this unwrap is safe
-        let key = std::str::from_utf8(key).unwrap();
+        // we don't have a strict guarantee this function was called with memcache
+        // safe keys. This matters mostly for writing the response back to the client
+        // in a protocol compliant way.
+        let key = std::str::from_utf8(key);
+
+        // invalid keys will be treated as a miss
+        if key.is_err() {
+            continue;
+        }
+
+        // unwrap is safe now, rebind for convenience
+        let key = key.unwrap();
 
         match timeout(Duration::from_millis(200), client.get(cache_name, key)).await {
             Ok(Ok(response)) => {
-                match response.result {
-                    MomentoGetStatus::ERROR => {
-                        // we got some error from
-                        // the backend.
-                        BACKEND_EX.increment();
-
-                        // ignore and move on to the next key, treating this as
-                        // a cache miss
-                    }
-                    MomentoGetStatus::HIT => {
+                match response {
+                    GetResponse::Hit { value } => {
                         GET_KEY_HIT.increment();
 
-                        let length = response.value.len();
+                        let value: Vec<u8> = value.into();
 
-                        let item_header = format!("VALUE {} 0 {}\r\n", key, length);
+                        let length = value.len();
 
-                        klog_get(key, response.value.len());
+                        let item_header = format!("VALUE {key} 0 {length}\r\n");
+
+                        klog_1(&"get", &key, Status::Hit, length);
 
                         response_buf.extend_from_slice(item_header.as_bytes());
-                        response_buf.extend_from_slice(&response.value);
+                        response_buf.extend_from_slice(&value);
                         response_buf.extend_from_slice(b"\r\n");
                     }
-                    MomentoGetStatus::MISS => {
+                    GetResponse::Miss => {
                         GET_KEY_MISS.increment();
 
                         // we don't write anything for a miss
 
-                        klog_get(key, 0);
+                        klog_1(&"get", &key, Status::Miss, 0);
                     }
                 }
-            }
-            Ok(Err(MomentoError::LimitExceeded(_))) => {
-                BACKEND_EX.increment();
-                BACKEND_EX_RATE_LIMITED.increment();
             }
             Ok(Err(e)) => {
                 // we got some error from the momento client
                 // log and incr stats and move on treating it
                 // as a miss
-                error!("error for get: {}", e);
+                error!("backend error for get: {}", e);
                 BACKEND_EX.increment();
+
+                klog_1(&"get", &key, Status::ServerError, 0);
             }
             Err(_) => {
                 // we had a timeout, incr stats and move on
                 // treating it as a miss
                 BACKEND_EX.increment();
                 BACKEND_EX_TIMEOUT.increment();
+
+                klog_1(&"get", &key, Status::Timeout, 0);
             }
         }
     }

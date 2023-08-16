@@ -102,14 +102,13 @@ use core::time::Duration;
 use crossbeam_channel::{bounded, Sender};
 use entrystore::EntryStore;
 use logger::{Drain, Klog};
+use metriken::*;
 use protocol_common::{Compose, Execute, Parse};
-use queues::Queues;
-use rustcommon_metrics::*;
 use session::{Buf, ServerSession, Session};
 use slab::Slab;
 use std::io::{Error, ErrorKind, Result};
 use std::sync::Arc;
-use waker::Waker;
+use switchboard::{Queues, Waker};
 
 mod listener;
 mod process;
@@ -120,7 +119,7 @@ use workers::WorkersBuilder;
 
 pub use process::{Process, ProcessBuilder};
 
-type Instant = rustcommon_metrics::time::Instant<rustcommon_metrics::time::Nanoseconds<u64>>;
+type Instant = clocksource::Instant<clocksource::Nanoseconds<u64>>;
 
 // TODO(bmartin): this *should* be plenty safe, the queue should rarely ever be
 // full, and a single wakeup should drain at least one message and make room for
@@ -148,7 +147,8 @@ pub static PERCENTILES: &[(&str, f64)] = &[
 ];
 
 // stats
-counter!(PROCESS_REQ);
+#[metric(name = "process_req")]
+pub static PROCESS_REQ: Counter = Counter::new();
 
 fn map_err(e: std::io::Error) -> Result<()> {
     match e.kind() {

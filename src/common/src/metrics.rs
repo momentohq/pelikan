@@ -1,4 +1,4 @@
-use rustcommon_metrics::*;
+use metriken::*;
 
 #[doc(hidden)]
 pub use macros::to_lowercase;
@@ -13,7 +13,7 @@ macro_rules! test_no_duplicates {
             #[test]
             fn assert_no_duplicate_metric_names() {
                 use std::collections::HashSet;
-                use rustcommon_metrics::*;
+                use metriken::*;
 
                 let mut seen = HashSet::new();
                 for metric in metrics().static_metrics() {
@@ -27,7 +27,8 @@ macro_rules! test_no_duplicates {
 
 pub use test_no_duplicates;
 
-gauge!(PID, "the process id");
+#[metric(name = "pid", description = "the process id")]
+pub static PID: Gauge = Gauge::new();
 
 pub fn init() {
     PID.set(std::process::id().into());

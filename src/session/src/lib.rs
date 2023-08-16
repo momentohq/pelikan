@@ -23,13 +23,14 @@ pub use server::ServerSession;
 use std::os::unix::prelude::AsRawFd;
 
 use ::net::*;
+use common::time::Nanoseconds;
 use core::borrow::{Borrow, BorrowMut};
 use core::fmt::Debug;
 use core::marker::PhantomData;
+use core::time::Duration;
+use metriken::*;
 use protocol_common::Compose;
 use protocol_common::Parse;
-use rustcommon_metrics::*;
-use rustcommon_time::Nanoseconds;
 use std::collections::VecDeque;
 use std::io::Error;
 use std::io::ErrorKind;
@@ -37,33 +38,50 @@ use std::io::Read;
 use std::io::Result;
 use std::io::Write;
 
-const ONE_SECOND: u64 = 1_000_000_000; // in nanoseconds
+#[metric(
+    name = "session_buffer_byte",
+    description = "current size of the session buffers in bytes"
+)]
+pub static SESSION_BUFFER_BYTE: Gauge = Gauge::new();
 
-gauge!(
-    SESSION_BUFFER_BYTE,
-    "current size of the session buffers in bytes"
-);
+#[metric(name = "session_recv", description = "number of reads from sessions")]
+pub static SESSION_RECV: Counter = Counter::new();
 
-counter!(SESSION_RECV, "number of reads from sessions");
-counter!(
-    SESSION_RECV_EX,
-    "number of exceptions while reading from sessions"
-);
-counter!(SESSION_RECV_BYTE, "number of bytes read from sessions");
-counter!(SESSION_SEND, "number of writes to sessions");
-counter!(
-    SESSION_SEND_EX,
-    "number of exceptions while writing to sessions"
-);
-counter!(SESSION_SEND_BYTE, "number of bytes written to sessions");
+#[metric(
+    name = "session_recv_ex",
+    description = "number of exceptions while reading from sessions"
+)]
+pub static SESSION_RECV_EX: Counter = Counter::new();
 
-heatmap!(
-    REQUEST_LATENCY,
-    ONE_SECOND,
-    "distribution of request latencies in nanoseconds"
-);
+#[metric(
+    name = "session_recv_byte",
+    description = "number of bytes read from sessions"
+)]
+pub static SESSION_RECV_BYTE: Counter = Counter::new();
 
-type Instant = rustcommon_time::Instant<Nanoseconds<u64>>;
+#[metric(name = "session_send", description = "number of writes to sessions")]
+pub static SESSION_SEND: Counter = Counter::new();
+
+#[metric(
+    name = "session_send_ex",
+    description = "number of exceptions while writing to sessions"
+)]
+pub static SESSION_SEND_EX: Counter = Counter::new();
+
+#[metric(
+    name = "session_send_byte",
+    description = "number of bytes written to sessions"
+)]
+pub static SESSION_SEND_BYTE: Counter = Counter::new();
+
+#[metric(
+    name = "request_latency",
+    description = "distribution of request latencies in nanoseconds"
+)]
+pub static REQUEST_LATENCY: Heatmap =
+    Heatmap::new(0, 8, 32, Duration::from_secs(60), Duration::from_secs(1));
+
+type Instant = common::time::Instant<Nanoseconds<u64>>;
 
 // The size of one kilobyte, in bytes
 const KB: usize = 1024;
@@ -140,8 +158,10 @@ impl Session {
         let mut read = 0;
 
         loop {
+            let remaining_mut = self.read_buffer.remaining_mut();
+
             // if the buffer has too little space available, expand it
-            if self.read_buffer.remaining_mut() < BUFFER_MIN_FREE {
+            if remaining_mut < BUFFER_MIN_FREE {
                 self.read_buffer.reserve(TARGET_READ_SIZE);
             }
 
@@ -159,6 +179,19 @@ impl Session {
                         self.read_buffer.advance_mut(n);
                     }
                     read += n;
+
+                    #[cfg(target_family = "unix")]
+                    {
+                        // On UNIX systems where we're using kqueue and epoll we
+                        // can rely on the fact that if we didn't fill the free
+                        // space in the buffer on this read, that there is no
+                        // data left to read right now.
+                        //
+                        // By returning here, we save ourselves an extra read()
+                        if n < remaining_mut {
+                            return Ok(read);
+                        }
+                    }
                 }
                 Err(e) => match e.kind() {
                     ErrorKind::WouldBlock => {

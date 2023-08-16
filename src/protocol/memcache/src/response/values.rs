@@ -54,6 +54,10 @@ impl Value {
     pub fn len(&self) -> Option<usize> {
         self.data.as_ref().map(|v| v.len())
     }
+
+    pub fn value(&self) -> Option<&[u8]> {
+        self.data.as_ref().map(|v| v.as_ref())
+    }
 }
 
 impl Compose for Values {
@@ -122,13 +126,13 @@ pub fn parse(input: &[u8]) -> IResult<&[u8], Values> {
             let (i, c) = take_till(|b| b == b'\r')(i)?;
             if !c.is_empty() {
                 // make sure it's a valid string
-                let c = std::str::from_utf8(c)
-                    .map_err(|_| nom::Err::Failure((i, nom::error::ErrorKind::Tag)))?;
+                let c = std::str::from_utf8(c).map_err(|_| {
+                    nom::Err::Failure(nom::error::Error::new(i, nom::error::ErrorKind::Tag))
+                })?;
                 // and make sure that string represents a 64bit integer
-                cas = Some(
-                    c.parse::<u64>()
-                        .map_err(|_| nom::Err::Failure((i, nom::error::ErrorKind::Tag)))?,
-                );
+                cas = Some(c.parse::<u64>().map_err(|_| {
+                    nom::Err::Failure(nom::error::Error::new(i, nom::error::ErrorKind::Tag))
+                })?);
             }
             input = i;
         }
@@ -167,7 +171,10 @@ pub fn parse(input: &[u8]) -> IResult<&[u8], Values> {
                 continue;
             }
             _ => {
-                return Err(nom::Err::Failure((i, nom::error::ErrorKind::Tag)));
+                return Err(nom::Err::Failure(nom::error::Error::new(
+                    i,
+                    nom::error::ErrorKind::Tag,
+                )));
             }
         }
     }

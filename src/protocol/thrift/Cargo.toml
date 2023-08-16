@@ -1,6 +1,6 @@
 [package]
 name = "protocol-thrift"
-authors = ["Brian Martin <bmartin@twitter.com>"]
+authors = ["Brian Martin <brian@pelikan.io>"]
 
 version = { workspace = true }
 edition = { workspace = true }
@@ -11,5 +11,5 @@ license = { workspace = true }
 [dependencies]
 common = { path = "../../common" }
 logger = { path = "../../logger" }
+metriken = { workspace = true }
 protocol-common = { path = "../../protocol/common" }
-rustcommon-metrics = { workspace = true }

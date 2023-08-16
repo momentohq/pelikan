@@ -6,7 +6,7 @@ use crate::eviction::*;
 use crate::item::*;
 use crate::segments::*;
 use core::num::NonZeroU32;
-use datapool::*;
+use datatier::*;
 
 /// `Segments` contain all items within the cache. This struct is a collection
 /// of individual `Segment`s which are represented by a `SegmentHeader` and a
@@ -141,7 +141,7 @@ impl Segments {
     ) -> Option<RawItem> {
         let seg_id = seg_id.map(|v| v.get())?;
         trace!("getting item from: seg: {} offset: {}", seg_id, offset);
-        assert!(seg_id <= self.cap as u32);
+        assert!(seg_id <= self.cap);
 
         let seg_begin = self.segment_size() as usize * (seg_id as usize - 1);
         let seg_end = seg_begin + self.segment_size() as usize;
@@ -419,7 +419,6 @@ impl Segments {
                 self.headers[id_idx].write_offset()
             );
 
-            common::time::refresh_clock();
             self.headers[id_idx].mark_created();
             self.headers[id_idx].mark_merged();
 
@@ -558,7 +557,7 @@ impl Segments {
                 // reduces CPU load under heavy rewrite/delete workloads at the
                 // cost of letting more dead items remain in the segements,
                 // reducing the hitrate
-                // if self.headers[seg_id as usize].merge_at() + CoarseDuration::from_secs(30) > CoarseInstant::recent() {
+                // if self.headers[seg_id as usize].merge_at() + CoarseDuration::from_secs(30) > CoarseInstant::now() {
                 //     return Ok(());
                 // }
 
@@ -594,7 +593,7 @@ impl Segments {
         for id in 1..=self.cap {
             // this is safe because we start iterating from 1
             let segment = self
-                .get_mut(unsafe { NonZeroU32::new_unchecked(id as u32) })
+                .get_mut(unsafe { NonZeroU32::new_unchecked(id) })
                 .unwrap();
             segment.check_magic();
             let count = segment.live_items();

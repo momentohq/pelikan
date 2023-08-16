@@ -12,10 +12,10 @@
 extern crate logger;
 
 use backtrace::Backtrace;
-use clap::{App, Arg};
+use clap::{Arg, Command};
 use config::PingserverConfig;
+use metriken::*;
 use pelikan_pingserver_rs::Pingserver;
-use rustcommon_metrics::*;
 use server::PERCENTILES;
 
 /// The entry point into the running Pingserver instance. This function parses
@@ -24,15 +24,14 @@ use server::PERCENTILES;
 fn main() {
     // custom panic hook to terminate whole process after unwinding
     std::panic::set_hook(Box::new(|s| {
-        eprintln!("{}", s);
+        eprintln!("{s}");
         eprintln!("{:?}", Backtrace::new());
         std::process::exit(101);
     }));
 
     // parse command line options
-    let matches = App::new(env!("CARGO_BIN_NAME"))
+    let matches = Command::new(env!("CARGO_BIN_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
-        .version_short("v")
         .long_about(
             "A rust implementation of, arguably, the most over-engineered ping \
             server.\n\n\
@@ -43,25 +42,26 @@ fn main() {
             environment.",
         )
         .arg(
-            Arg::with_name("stats")
-                .short("s")
+            Arg::new("stats")
+                .short('s')
                 .long("stats")
                 .help("List all metrics in stats")
-                .takes_value(false),
+                .action(clap::ArgAction::SetTrue),
         )
         .arg(
-            Arg::with_name("CONFIG")
+            Arg::new("CONFIG")
                 .help("Server configuration file")
+                .action(clap::ArgAction::Set)
                 .index(1),
         )
         .get_matches();
 
-    if matches.is_present("stats") {
+    if matches.get_flag("stats") {
         println!("{:<31} {:<15} DESCRIPTION", "NAME", "TYPE");
 
         let mut metrics = Vec::new();
 
-        for metric in &rustcommon_metrics::metrics() {
+        for metric in &metriken::metrics() {
             let any = match metric.as_any() {
                 Some(any) => any,
                 None => {
@@ -76,7 +76,7 @@ fn main() {
             } else if any.downcast_ref::<Heatmap>().is_some() {
                 for (label, _) in PERCENTILES {
                     let name = format!("{}_{}", metric.name(), label);
-                    metrics.push(format!("{:<31} percentile", name));
+                    metrics.push(format!("{name:<31} percentile"));
                 }
             } else {
                 continue;
@@ -85,13 +85,13 @@ fn main() {
 
         metrics.sort();
         for metric in metrics {
-            println!("{}", metric);
+            println!("{metric}");
         }
         std::process::exit(0);
     }
 
     // load config from file
-    let config = if let Some(file) = matches.value_of("CONFIG") {
+    let config = if let Some(file) = matches.get_one::<String>("CONFIG") {
         debug!("loading config: {}", file);
         match PingserverConfig::load(file) {
             Ok(c) => c,
@@ -108,7 +108,7 @@ fn main() {
     match Pingserver::new(config) {
         Ok(s) => s.wait(),
         Err(e) => {
-            eprintln!("error launching pingserver: {}", e);
+            eprintln!("error launching pingserver: {e}");
             std::process::exit(1);
         }
     }

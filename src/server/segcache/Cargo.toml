@@ -1,7 +1,7 @@
 [package]
 name = "segcache"
 description = "a Memcache protocol server with segment-structured storage"
-authors = ["Brian Martin <bmartin@twitter.com>"]
+authors = ["Brian Martin <brian@pelikan.io>"]
 
 version = { workspace = true }
 edition = { workspace = true }
@@ -44,8 +44,8 @@ common = { path = "../../common" }
 config = { path = "../../config" }
 entrystore = { path = "../../entrystore" }
 logger = { path = "../../logger" }
+metriken = { workspace = true }
 protocol-memcache = { path = "../../protocol/memcache" }
-rustcommon-metrics = { workspace = true }
 server = { path = "../../core/server" }
 
 [dev-dependencies]

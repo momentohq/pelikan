@@ -4,9 +4,19 @@
 
 use super::*;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Integer {
     pub(crate) inner: i64,
+}
+
+impl Integer {
+    pub fn new(value: i64) -> Self {
+        Self { inner: value }
+    }
+
+    pub fn value(self) -> i64 {
+        self.inner
+    }
 }
 
 impl Compose for Integer {
@@ -24,7 +34,7 @@ pub fn parse(input: &[u8]) -> IResult<&[u8], Integer> {
     let string = unsafe { std::str::from_utf8_unchecked(string).to_owned() };
     let value = string
         .parse::<i64>()
-        .map_err(|_| nom::Err::Failure((input, nom::error::ErrorKind::Tag)))?;
+        .map_err(|_| Err::Failure(nom::error::Error::new(input, nom::error::ErrorKind::Tag)))?;
     Ok((input, Integer { inner: value }))
 }
 

@@ -1,7 +1,7 @@
 [package]
 name = "server"
 description = "core server event loops and threads for Pelikan servers"
-authors = ["Brian Martin <bmartin@twitter.com>"]
+authors = ["Brian Martin <brian@pelikan.io>"]
 
 version = { workspace = true }
 edition = { workspace = true }
@@ -12,15 +12,17 @@ license = { workspace = true }
 [dependencies]
 admin = { path = "../admin" }
 common = { path = "../../common" }
+clocksource = { workspace = true }
 config = { path = "../../config" }
 crossbeam-channel = { workspace = true }
 entrystore = { path = "../../entrystore" }
+libc = {workspace = true}
 logger = { path = "../../logger" }
+metriken = { workspace = true }
 net = { path = "../../net" }
 protocol-admin = { path = "../../protocol/admin" }
 protocol-common = { path = "../../protocol/common" }
-queues = { path = "../../queues" }
-rustcommon-metrics = { workspace = true }
 session = { path = "../../session" }
+signal-hook = {workspace = true}
 slab = { workspace = true }
-waker = { path = "../waker" }
+switchboard = { workspace = true }

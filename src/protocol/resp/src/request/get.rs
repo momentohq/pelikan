@@ -3,16 +3,16 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 
 use super::*;
+use logger::klog;
 use std::io::{Error, ErrorKind};
 use std::sync::Arc;
 
 #[derive(Debug, PartialEq, Eq)]
-#[allow(clippy::redundant_allocation)]
-pub struct GetRequest {
-    key: Arc<Box<[u8]>>,
+pub struct Get {
+    key: Arc<[u8]>,
 }
 
-impl TryFrom<Message> for GetRequest {
+impl TryFrom<Message> for Get {
     type Error = Error;
 
     fn try_from(other: Message) -> Result<Self, Error> {
@@ -50,11 +50,9 @@ impl TryFrom<Message> for GetRequest {
     }
 }
 
-impl GetRequest {
+impl Get {
     pub fn new(key: &[u8]) -> Self {
-        Self {
-            key: Arc::new(key.to_owned().into_boxed_slice()),
-        }
+        Self { key: key.into() }
     }
 
     pub fn key(&self) -> &[u8] {
@@ -62,8 +60,8 @@ impl GetRequest {
     }
 }
 
-impl From<&GetRequest> for Message {
-    fn from(other: &GetRequest) -> Message {
+impl From<&Get> for Message {
+    fn from(other: &Get) -> Message {
         Message::Array(Array {
             inner: Some(vec![
                 Message::BulkString(BulkString::new(b"GET")),
@@ -73,13 +71,26 @@ impl From<&GetRequest> for Message {
     }
 }
 
-impl Compose for GetRequest {
+impl Compose for Get {
     fn compose(&self, buf: &mut dyn BufMut) -> usize {
         let message = Message::from(self);
         message.compose(buf)
     }
 }
 
+impl Klog for Get {
+    type Response = Response;
+
+    fn klog(&self, response: &Self::Response) {
+        let (code, len) = match response {
+            Message::BulkString(_) if *response == Response::null() => (ResponseCode::Miss, 0),
+            Message::BulkString(s) => (ResponseCode::Hit, s.len()),
+            _ => (ResponseCode::Miss, 0),
+        };
+
+        klog!("\"get {}\" {} {}", string_key(self.key()), code as u32, len);
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -89,7 +100,7 @@ mod tests {
         let parser = RequestParser::new();
         assert_eq!(
             parser.parse(b"get 0\r\n").unwrap().into_inner(),
-            Request::Get(GetRequest::new(b"0"))
+            Request::Get(Get::new(b"0"))
         );
 
         assert_eq!(
@@ -97,7 +108,7 @@ mod tests {
                 .parse(b"get \"\0\r\n key\"\r\n")
                 .unwrap()
                 .into_inner(),
-            Request::Get(GetRequest::new(b"\0\r\n key"))
+            Request::Get(Get::new(b"\0\r\n key"))
         );
 
         assert_eq!(
@@ -105,7 +116,7 @@ mod tests {
                 .parse(b"*2\r\n$3\r\nget\r\n$1\r\n0\r\n")
                 .unwrap()
                 .into_inner(),
-            Request::Get(GetRequest::new(b"0"))
+            Request::Get(Get::new(b"0"))
         );
     }
 }

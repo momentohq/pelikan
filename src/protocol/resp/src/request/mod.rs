@@ -4,184 +4,278 @@
 
 use crate::message::*;
 use crate::*;
+use logger::Klog;
 use protocol_common::BufMut;
 use protocol_common::Parse;
 use protocol_common::ParseOk;
+use std::borrow::Cow;
+use std::fmt::{Display, Formatter};
 use std::io::{Error, ErrorKind};
 use std::sync::Arc;
 
 mod badd;
+mod del;
 mod get;
-mod ping;
+mod hdel;
+mod hexists;
+mod hget;
+mod hgetall;
+mod hincrby;
+mod hkeys;
+mod hlen;
+mod hmget;
+mod hset;
+mod hvals;
+mod lindex;
+mod llen;
+mod lpop;
+mod lpush;
+mod lrange;
+mod ltrim;
+mod rpop;
+mod rpush;
+mod sadd;
+mod sdiff;
 mod set;
+mod sinter;
+mod sismember;
+mod smembers;
+mod srem;
+mod sunion;
 
-pub use badd::BAddRequest;
-pub use get::GetRequest;
-pub use ping::PingRequest;
-pub use set::SetRequest;
+pub use self::lindex::*;
+pub use self::llen::*;
+pub use self::lpop::*;
+pub use self::lpush::*;
+pub use self::lrange::*;
+pub use self::ltrim::*;
+pub use self::rpop::*;
+pub use self::rpush::*;
+pub use self::sdiff::*;
+pub use self::sinter::*;
+pub use self::sismember::*;
+pub use self::smembers::*;
+pub use self::srem::*;
+pub use self::sunion::*;
+pub use badd::*;
+pub use del::*;
+pub use get::*;
+pub use hdel::*;
+pub use hexists::*;
+pub use hget::*;
+pub use hgetall::*;
+pub use hincrby::*;
+pub use hkeys::*;
+pub use hlen::*;
+pub use hmget::*;
+pub use hset::*;
+pub use hvals::*;
+pub use sadd::*;
+pub use set::*;
 
-#[derive(Default)]
-pub struct RequestParser {
-    message_parser: MessageParser,
+/// response codes for klog
+/// matches Memcache protocol response codes for compatibility with existing tools
+/// [crate::memcache::MISS]
+#[allow(dead_code)]
+enum ResponseCode {
+    Miss = 0,
+    Hit = 4,
+    Stored = 5,
+    Exists = 6,
+    Deleted = 7,
+    NotFound = 8,
+    NotStored = 9,
 }
+
+pub type FieldValuePair = (Arc<[u8]>, Arc<[u8]>);
+
+/// Macro to deal with the boilerplate around the Request enum.
+macro_rules! decl_request {
+    {
+        $vis:vis enum $name:ident {
+            $(
+                $variant:ident($type:ty) => $command:literal
+            ),* $(,)?
+        }
+    } => {
+        #[derive(Debug, PartialEq, Eq)]
+        $vis enum $name {
+            $( $variant($type), )*
+        }
+
+        impl Parse<$name> for RequestParser {
+            fn parse(&self, buffer: &[u8]) -> Result<ParseOk<$name>, Error> {
+                use crate::parse::*;
+
+                let mut parser = Parser::new(buffer);
+                let result = CommandParser::new(&mut parser)
+                    .and_then(|command| command.parse_message());
+
+                let message = match result {
+                    Ok(message) => message,
+                    Err(ParseError::Incomplete) => return Err(Error::from(ErrorKind::WouldBlock)),
+                    Err(e) => return Err(Error::new(ErrorKind::Other, e.to_string())),
+                };
+                let consumed = (parser.remaining().as_ptr() as usize) - (buffer.as_ptr() as usize);
+
+                let array = match &message {
+                    Message::Array(Array { inner: Some(array)}) if !array.is_empty() => array,
+                    _ => return Err(Error::new(ErrorKind::Other, "malformed command"))
+                };
+
+                let command = match &array[0] {
+                    Message::BulkString(BulkString { inner: Some(command) }) => command,
+                    // all valid commands are encoded as a bulk string
+                    _ => return Err(Error::new(ErrorKind::Other, "malformed command"))
+                };
+
+                let response = match command {
+                    $( _ if command.eq_ignore_ascii_case($command.as_bytes()) => <$type>::try_from(message)?.into(), )*
+                    _ => return Err(Error::new(ErrorKind::Other, "unknown command"))
+                };
+
+                Ok(ParseOk::new(response, consumed))
+            }
+        }
+
+        impl $name {
+            pub fn command(&self) -> &'static str {
+                match self {
+                    $( Self::$variant(_) => $command, )*
+                }
+            }
+        }
+
+        impl Compose for $name {
+            fn compose(&self, buf: &mut dyn BufMut) -> usize {
+                match self {
+                    $( Self::$variant(v) => v.compose(buf), )*
+                }
+            }
+        }
+
+        $(
+            impl From<$type> for $name {
+                fn from(value: $type) -> Self {
+                    Self::$variant(value)
+                }
+            }
+        )*
+    }
+}
+
+decl_request! {
+    pub enum Request {
+        BtreeAdd(BtreeAdd) => "badd",
+        Del(Del) => "del",
+        Get(Get) => "get",
+        HashDelete(HashDelete) => "hdel",
+        HashExists(HashExists) => "hexists",
+        HashGet(HashGet) => "hget",
+        HashGetAll(HashGetAll) => "hgetall",
+        HashKeys(HashKeys) => "hkeys",
+        HashLength(HashLength) => "hlen",
+        HashMultiGet(HashMultiGet) => "hmget",
+        HashSet(HashSet) => "hset",
+        HashValues(HashValues) => "hvals",
+        HashIncrBy(HashIncrBy) => "hincrby",
+        ListIndex(ListIndex) => "lindex",
+        ListLen(ListLen) => "llen",
+        ListPop(ListPop) => "lpop",
+        ListPopBack(ListPopBack) => "rpop",
+        ListRange(ListRange) => "lrange",
+        ListPush(ListPush) => "lpush",
+        ListPushBack(ListPushBack) => "rpush",
+        ListTrim(ListTrim) => "ltrim",
+        Set(Set) => "set",
+        SetAdd(SetAdd) => "sadd",
+        SetRem(SetRem) => "srem",
+        SetDiff(SetDiff) => "sdiff",
+        SetUnion(SetUnion) => "sunion",
+        SetIntersect(SetIntersect) => "sinter",
+        SetMembers(SetMembers) => "smembers",
+        SetIsMember(SetIsMember) => "sismember",
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct RequestParser {}
 
 impl RequestParser {
     pub fn new() -> Self {
-        Self {
-            message_parser: MessageParser {},
-        }
+        Self {}
     }
 }
 
-impl Parse<Request> for RequestParser {
-    fn parse(&self, buffer: &[u8]) -> Result<ParseOk<Request>, Error> {
-        // we have two different parsers, one for RESP and one for inline
-        // both require that there's at least one character in the buffer
-        if buffer.is_empty() {
-            return Err(Error::from(ErrorKind::WouldBlock));
-        }
+impl Klog for Request {
+    type Response = Response;
 
-        let (message, consumed) = if matches!(buffer[0], b'*' | b'+' | b'-' | b':' | b'$') {
-            self.message_parser.parse(buffer).map(|v| {
-                let c = v.consumed();
-                (v.into_inner(), c)
-            })?
-        } else {
-            let mut remaining = buffer;
-
-            let mut message = Vec::new();
-
-            while let Ok((r, string)) = string(remaining) {
-                message.push(Message::BulkString(BulkString {
-                    inner: Some(Arc::new(string.to_owned().into_boxed_slice())),
-                }));
-                remaining = r;
-
-                if let Ok((r, _)) = space1(remaining) {
-                    remaining = r;
-                } else {
-                    break;
-                }
-            }
-
-            if &remaining[0..2] != b"\r\n" {
-                return Err(Error::from(ErrorKind::WouldBlock));
-            }
-
-            let message = Message::Array(Array {
-                inner: Some(message),
-            });
-
-            let consumed = (buffer.len() - remaining.len()) + 2;
-
-            (message, consumed)
-        };
-
-        match &message {
-            Message::Array(array) => {
-                if array.inner.is_none() {
-                    return Err(Error::new(ErrorKind::Other, "malformed command"));
-                }
-
-                let array = array.inner.as_ref().unwrap();
-
-                if array.is_empty() {
-                    return Err(Error::new(ErrorKind::Other, "malformed command"));
-                }
-
-                match &array[0] {
-                    Message::BulkString(c) => match c.inner.as_ref().map(|v| v.as_ref().as_ref()) {
-                        Some(b"badd") | Some(b"BADD") => {
-                            BAddRequest::try_from(message).map(Request::from)
-                        }
-                        Some(b"get") | Some(b"GET") => {
-                            GetRequest::try_from(message).map(Request::from)
-                        }
-                        Some(b"set") | Some(b"SET") => {
-                            SetRequest::try_from(message).map(Request::from)
-                        }
-                        Some(b"ping") | Some(b"PING") => {
-                            PingRequest::try_from(message).map(Request::from)
-                        }
-                        _ => Err(Error::new(ErrorKind::Other, "unknown command")),
-                    },
-                    _ => {
-                        // all valid commands are encoded as a bulk string
-                        Err(Error::new(ErrorKind::Other, "malformed command"))
-                    }
-                }
-            }
-            _ => {
-                // all valid requests are arrays
-                Err(Error::new(ErrorKind::Other, "malformed command"))
-            }
-        }
-        .map(|v| ParseOk::new(v, consumed))
-    }
-}
-
-impl Compose for Request {
-    fn compose(&self, buf: &mut dyn BufMut) -> usize {
+    fn klog(&self, response: &Self::Response) {
         match self {
-            Self::BAdd(r) => r.compose(buf),
-            Self::Get(r) => r.compose(buf),
-            Self::Set(r) => r.compose(buf),
-            Self::Ping(r) => r.compose(buf),
+            Request::Get(r) => r.klog(response),
+            Request::Set(r) => r.klog(response),
+            _ => (),
         }
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum Request {
-    BAdd(BAddRequest),
-    Get(GetRequest),
-    Set(SetRequest),
-    Ping(PingRequest),
-}
-
-impl From<BAddRequest> for Request {
-    fn from(other: BAddRequest) -> Self {
-        Self::BAdd(other)
+impl Request {
+    pub fn del(keys: &[&[u8]]) -> Self {
+        Self::Del(Del::new(keys))
     }
-}
 
-impl From<GetRequest> for Request {
-    fn from(other: GetRequest) -> Self {
-        Self::Get(other)
+    pub fn get(key: &[u8]) -> Self {
+        Self::Get(Get::new(key))
     }
-}
 
-impl From<SetRequest> for Request {
-    fn from(other: SetRequest) -> Self {
-        Self::Set(other)
+    pub fn hash_delete(key: &[u8], fields: &[&[u8]]) -> Self {
+        Self::HashDelete(HashDelete::new(key, fields))
     }
-}
 
-impl From<PingRequest> for Request {
-    fn from(other: PingRequest) -> Self {
-        Self::Ping(other)
+    pub fn hash_exists(key: &[u8], field: &[u8]) -> Self {
+        Self::HashExists(HashExists::new(key, field))
     }
-}
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum Command {
-    BAdd,
-    Get,
-    Set,
-    Ping,
-}
+    pub fn hash_get(key: &[u8], field: &[u8]) -> Self {
+        Self::HashGet(HashGet::new(key, field))
+    }
 
-impl TryFrom<&[u8]> for Command {
-    type Error = ();
+    pub fn hash_get_all(key: &[u8]) -> Self {
+        Self::HashGetAll(HashGetAll::new(key))
+    }
 
-    fn try_from(other: &[u8]) -> Result<Self, ()> {
-        match other {
-            b"badd" | b"BADD" => Ok(Command::BAdd),
-            b"get" | b"GET" => Ok(Command::Get),
-            b"set" | b"SET" => Ok(Command::Set),
-            b"ping" | b"PING" => Ok(Command::Ping),
-            _ => Err(()),
-        }
+    pub fn hash_keys(key: &[u8]) -> Self {
+        Self::HashKeys(HashKeys::new(key))
+    }
+
+    pub fn hash_length(key: &[u8]) -> Self {
+        Self::HashLength(HashLength::new(key))
+    }
+
+    pub fn hash_multi_get(key: &[u8], fields: &[&[u8]]) -> Self {
+        Self::HashMultiGet(HashMultiGet::new(key, fields))
+    }
+
+    pub fn hash_set(key: &[u8], data: &[(&[u8], &[u8])]) -> Self {
+        Self::HashSet(HashSet::new(key, data))
+    }
+
+    pub fn hash_values(key: &[u8]) -> Self {
+        Self::HashValues(HashValues::new(key))
+    }
+
+    pub fn hash_incrby(key: &[u8], field: &[u8], increment: i64) -> Self {
+        Self::HashIncrBy(HashIncrBy::new(key, field, increment))
+    }
+
+    pub fn set(
+        key: &[u8],
+        value: &[u8],
+        expire_time: Option<ExpireTime>,
+        mode: SetMode,
+        get_old: bool,
+    ) -> Self {
+        Self::Set(Set::new(key, value, expire_time, mode, get_old))
     }
 }
 
@@ -192,4 +286,37 @@ pub enum ExpireTime {
     UnixSeconds(u64),
     UnixMilliseconds(u64),
     KeepTtl,
+}
+
+impl Default for ExpireTime {
+    fn default() -> Self {
+        ExpireTime::Seconds(0)
+    }
+}
+impl Display for ExpireTime {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExpireTime::Seconds(s) => write!(f, "{s}s"),
+            ExpireTime::Milliseconds(ms) => write!(f, "{ms}ms"),
+            ExpireTime::UnixSeconds(s) => write!(f, "{s}unix_secs"),
+            ExpireTime::UnixMilliseconds(ms) => write!(f, "{ms}unix_ms"),
+            ExpireTime::KeepTtl => write!(f, "keep_ttl"),
+        }
+    }
+}
+
+fn string_key(key: &[u8]) -> Cow<'_, str> {
+    String::from_utf8_lossy(key)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::RequestParser;
+    use protocol_common::Parse;
+
+    #[test]
+    fn it_should_not_panic_on_newline_delimited_get_key() {
+        let parser = RequestParser::new();
+        assert!(parser.parse(b"GET test\n").is_err());
+    }
 }

@@ -5,12 +5,18 @@
 use crate::*;
 use session::Buf;
 
-gauge!(ADMIN_CONN_CURR);
-counter!(ADMIN_CONN_ACCEPT);
-counter!(ADMIN_CONN_CLOSE);
+#[metric(name = "admin_conn_curr")]
+pub static ADMIN_CONN_CURR: Gauge = Gauge::new();
+
+#[metric(name = "admin_conn_accept")]
+pub static ADMIN_CONN_ACCEPT: Counter = Counter::new();
+
+#[metric(name = "admin_conn_close")]
+pub static ADMIN_CONN_CLOSE: Counter = Counter::new();
 
 pub(crate) async fn admin(mut log_drain: Box<dyn logger::Drain>, admin_listener: TcpListener) {
     loop {
+        clocksource::refresh_clock();
         let _ = log_drain.flush();
 
         // accept a new client
@@ -120,7 +126,7 @@ async fn handle_admin_client(mut socket: tokio::net::TcpStream) {
 
 async fn stats_response(socket: &mut tokio::net::TcpStream) -> Result<(), Error> {
     let mut data = Vec::new();
-    for metric in &rustcommon_metrics::metrics() {
+    for metric in &metriken::metrics() {
         let any = match metric.as_any() {
             Some(any) => any,
             None => {
@@ -153,13 +159,14 @@ async fn stats_response(socket: &mut tokio::net::TcpStream) -> Result<(), Error>
             data.push(format!("STAT {} {}\r\n", metric.name(), gauge.value()));
         } else if let Some(heatmap) = any.downcast_ref::<Heatmap>() {
             for (label, value) in PERCENTILES {
-                let percentile = heatmap.percentile(*value).map(|b| b.high()).unwrap_or(0);
-                data.push(format!(
-                    "STAT {}_{} {}\r\n",
-                    metric.name(),
-                    label,
-                    percentile
-                ));
+                if let Some(Ok(bucket)) = heatmap.percentile(*value) {
+                    data.push(format!(
+                        "STAT {}_{} {}\r\n",
+                        metric.name(),
+                        label,
+                        bucket.high()
+                    ));
+                }
             }
         }
     }

@@ -8,21 +8,32 @@ use std::sync::Arc;
 use std::io::{Error, ErrorKind};
 
 #[derive(Debug, PartialEq, Eq)]
-#[allow(clippy::redundant_allocation)]
 pub struct BulkString {
-    pub(crate) inner: Option<Arc<Box<[u8]>>>,
+    pub(crate) inner: Option<Arc<[u8]>>,
 }
 
 impl BulkString {
     pub fn new(bytes: &[u8]) -> Self {
         Self {
-            inner: Some(Arc::new(bytes.to_owned().into_boxed_slice())),
+            inner: Some(bytes.into()),
         }
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.as_ref().map(|i| i.len()).unwrap_or(0)
+    }
+
+    pub fn null() -> Self {
+        Self { inner: None }
+    }
+
+    pub fn bytes(&self) -> Option<&[u8]> {
+        self.inner.as_ref().map(|v| v.as_ref())
     }
 }
 
-impl From<Arc<Box<[u8]>>> for BulkString {
-    fn from(other: Arc<Box<[u8]>>) -> Self {
+impl From<Arc<[u8]>> for BulkString {
+    fn from(other: Arc<[u8]>) -> Self {
         Self { inner: Some(other) }
     }
 }
@@ -51,6 +62,7 @@ impl Compose for BulkString {
             buf.put_slice(b"\r\n");
             header.as_bytes().len() + value.len() + 2
         } else {
+            // A null bulk string is serialized as `$-1\r\n`.
             buf.put_slice(b"$-1\r\n");
             5
         }
@@ -63,7 +75,10 @@ pub fn parse(input: &[u8]) -> IResult<&[u8], BulkString> {
             let (input, _) = take(1usize)(input)?;
             let (input, len) = digit1(input)?;
             if len != b"1" {
-                return Err(nom::Err::Failure((input, nom::error::ErrorKind::Tag)));
+                return Err(Err::Failure(nom::error::Error::new(
+                    input,
+                    nom::error::ErrorKind::Tag,
+                )));
             }
             let (input, _) = crlf(input)?;
             Ok((input, BulkString { inner: None }))
@@ -71,20 +86,20 @@ pub fn parse(input: &[u8]) -> IResult<&[u8], BulkString> {
         Some(_) => {
             let (input, len) = digit1(input)?;
             let len = unsafe { std::str::from_utf8_unchecked(len).to_owned() };
-            let len = len
-                .parse::<usize>()
-                .map_err(|_| nom::Err::Failure((input, nom::error::ErrorKind::Tag)))?;
+            let len = len.parse::<usize>().map_err(|_| {
+                Err::Failure(nom::error::Error::new(input, nom::error::ErrorKind::Tag))
+            })?;
             let (input, _) = crlf(input)?;
             let (input, value) = take(len)(input)?;
             let (input, _) = crlf(input)?;
             Ok((
                 input,
                 BulkString {
-                    inner: Some(Arc::new(value.to_vec().into_boxed_slice())),
+                    inner: Some(value.into()),
                 },
             ))
         }
-        None => Err(Err::Incomplete(Needed::Size(1))),
+        None => Err(Err::Incomplete(Needed::new(1))),
     }
 }
 

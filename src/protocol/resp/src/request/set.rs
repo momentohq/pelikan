@@ -3,6 +3,8 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 
 use super::*;
+use logger::klog;
+use std::fmt::{Display, Formatter};
 use std::io::{Error, ErrorKind};
 use std::sync::Arc;
 
@@ -12,18 +14,43 @@ pub enum SetMode {
     Replace,
     Set,
 }
+impl Display for SetMode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let string = match self {
+            SetMode::Add => "add",
+            SetMode::Replace => "replace",
+            SetMode::Set => "set",
+        };
+        write!(f, "{string}")
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
-#[allow(clippy::redundant_allocation)]
-pub struct SetRequest {
-    key: Arc<Box<[u8]>>,
-    value: Arc<Box<[u8]>>,
+pub struct Set {
+    key: Arc<[u8]>,
+    value: Arc<[u8]>,
     expire_time: Option<ExpireTime>,
     mode: SetMode,
     get_old: bool,
 }
 
-impl SetRequest {
+impl Set {
+    pub fn new(
+        key: &[u8],
+        value: &[u8],
+        expire_time: Option<ExpireTime>,
+        mode: SetMode,
+        get_old: bool,
+    ) -> Self {
+        Self {
+            key: key.into(),
+            value: value.into(),
+            expire_time,
+            mode,
+            get_old,
+        }
+    }
+
     pub fn key(&self) -> &[u8] {
         &self.key
     }
@@ -45,7 +72,7 @@ impl SetRequest {
     }
 }
 
-impl TryFrom<Message> for SetRequest {
+impl TryFrom<Message> for Set {
     type Error = Error;
 
     fn try_from(other: Message) -> Result<Self, Error> {
@@ -63,14 +90,14 @@ impl TryFrom<Message> for SetRequest {
             let _command = take_bulk_string(&mut array)?;
 
             let key = take_bulk_string(&mut array)?
-                .ok_or(Error::new(ErrorKind::Other, "malformed command"))?;
+                .ok_or_else(|| Error::new(ErrorKind::Other, "malformed command"))?;
 
             if key.is_empty() {
                 return Err(Error::new(ErrorKind::Other, "malformed command"));
             }
 
             let value = take_bulk_string(&mut array)?
-                .ok_or(Error::new(ErrorKind::Other, "malformed command"))?;
+                .ok_or_else(|| Error::new(ErrorKind::Other, "malformed command"))?;
 
             let mut expire_time = None;
             let mut mode = SetMode::Set;
@@ -84,7 +111,7 @@ impl TryFrom<Message> for SetRequest {
                         }
 
                         let s = take_bulk_string_as_u64(&mut array)?
-                            .ok_or(Error::new(ErrorKind::Other, "malformed command"))?;
+                            .ok_or_else(|| Error::new(ErrorKind::Other, "malformed command"))?;
 
                         expire_time = Some(ExpireTime::Seconds(s));
                     }
@@ -94,7 +121,7 @@ impl TryFrom<Message> for SetRequest {
                         }
 
                         let ms = take_bulk_string_as_u64(&mut array)?
-                            .ok_or(Error::new(ErrorKind::Other, "malformed command"))?;
+                            .ok_or_else(|| Error::new(ErrorKind::Other, "malformed command"))?;
 
                         expire_time = Some(ExpireTime::Milliseconds(ms));
                     }
@@ -104,7 +131,7 @@ impl TryFrom<Message> for SetRequest {
                         }
 
                         let s = take_bulk_string_as_u64(&mut array)?
-                            .ok_or(Error::new(ErrorKind::Other, "malformed command"))?;
+                            .ok_or_else(|| Error::new(ErrorKind::Other, "malformed command"))?;
 
                         expire_time = Some(ExpireTime::UnixSeconds(s));
                     }
@@ -114,7 +141,7 @@ impl TryFrom<Message> for SetRequest {
                         }
 
                         let ms = take_bulk_string_as_u64(&mut array)?
-                            .ok_or(Error::new(ErrorKind::Other, "malformed command"))?;
+                            .ok_or_else(|| Error::new(ErrorKind::Other, "malformed command"))?;
 
                         expire_time = Some(ExpireTime::UnixMilliseconds(ms));
                     }
@@ -164,8 +191,8 @@ impl TryFrom<Message> for SetRequest {
     }
 }
 
-impl From<&SetRequest> for Message {
-    fn from(other: &SetRequest) -> Message {
+impl From<&Set> for Message {
+    fn from(other: &Set) -> Message {
         let mut v = vec![
             Message::bulk_string(b"SET"),
             Message::BulkString(BulkString::from(other.key.clone())),
@@ -175,19 +202,19 @@ impl From<&SetRequest> for Message {
         match other.expire_time {
             Some(ExpireTime::Seconds(s)) => {
                 v.push(Message::bulk_string(b"EX"));
-                v.push(Message::bulk_string(format!("{}", s).as_bytes()));
+                v.push(Message::bulk_string(format!("{s}").as_bytes()));
             }
             Some(ExpireTime::Milliseconds(ms)) => {
                 v.push(Message::bulk_string(b"PX"));
-                v.push(Message::bulk_string(format!("{}", ms).as_bytes()));
+                v.push(Message::bulk_string(format!("{ms}").as_bytes()));
             }
             Some(ExpireTime::UnixSeconds(s)) => {
                 v.push(Message::bulk_string(b"EXAT"));
-                v.push(Message::bulk_string(format!("{}", s).as_bytes()));
+                v.push(Message::bulk_string(format!("{s}").as_bytes()));
             }
             Some(ExpireTime::UnixMilliseconds(ms)) => {
                 v.push(Message::bulk_string(b"PXAT"));
-                v.push(Message::bulk_string(format!("{}", ms).as_bytes()));
+                v.push(Message::bulk_string(format!("{ms}").as_bytes()));
             }
             Some(ExpireTime::KeepTtl) => {
                 v.push(Message::bulk_string(b"KEEPTTL"));
@@ -213,10 +240,35 @@ impl From<&SetRequest> for Message {
     }
 }
 
-impl Compose for SetRequest {
+impl Compose for Set {
     fn compose(&self, buf: &mut dyn BufMut) -> usize {
         let message = Message::from(self);
         message.compose(buf)
+    }
+}
+
+/// In order to match memcached klog we need a flag value, but this isn't something in the RESP
+/// protocol, so we just use zero.
+const FLAG: u8 = 0;
+
+impl Klog for Set {
+    type Response = Response;
+
+    fn klog(&self, response: &Self::Response) {
+        let (code, len) = match response {
+            Message::SimpleString(s) => (ResponseCode::Stored, s.len()),
+            _ => (ResponseCode::NotStored, 0),
+        };
+
+        klog!(
+            "\"set {} {} {} {}\" {} {}",
+            string_key(self.key()),
+            FLAG,
+            self.expire_time().unwrap_or(ExpireTime::default()),
+            self.value().len(),
+            code as u32,
+            len
+        );
     }
 }
 
