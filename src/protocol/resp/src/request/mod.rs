@@ -61,7 +61,6 @@ pub use self::sunion::*;
 pub use badd::*;
 pub use del::*;
 pub use get::*;
-pub use ping::*;
 pub use hdel::*;
 pub use hexists::*;
 pub use hget::*;
@@ -72,6 +71,7 @@ pub use hlen::*;
 pub use hmget::*;
 pub use hset::*;
 pub use hvals::*;
+pub use ping::*;
 pub use sadd::*;
 pub use set::*;
 

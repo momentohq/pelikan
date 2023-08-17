@@ -2,13 +2,13 @@
 // Licensed under the Apache License, Version 2.0
 // http://www.apache.org/licenses/LICENSE-2.0
 
+use crate::Error;
 use libc::socket;
 use momento::SimpleCacheClient;
-use crate::Error;
 use net::TCP_SEND_BYTE;
+use protocol_resp::Ping;
 use session::{SESSION_SEND, SESSION_SEND_BYTE, SESSION_SEND_EX};
 use tokio::io::AsyncWriteExt;
-use protocol_resp::Ping;
 
 const PONG_RSP: &[u8; 7] = b"+PONG\r\n";
 
