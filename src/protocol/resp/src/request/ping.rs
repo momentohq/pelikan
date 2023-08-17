@@ -5,7 +5,7 @@
 use super::*;
 use std::io::{Error, ErrorKind};
 
-#[metric(name = "ping")]
+#[metric(name = "ping2")]
 pub static PING: Counter = Counter::new();
 
 #[metric(name = "ping_ex")]
