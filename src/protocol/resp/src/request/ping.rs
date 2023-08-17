@@ -5,6 +5,12 @@
 use super::*;
 use std::io::{Error, ErrorKind};
 
+#[metric(name = "ping")]
+pub static PING: Counter = Counter::new();
+
+#[metric(name = "ping_ex")]
+pub static PING_EX: Counter = Counter::new();
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct Ping {}
 impl TryFrom<Message> for Ping {
