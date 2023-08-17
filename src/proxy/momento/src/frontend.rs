@@ -165,6 +165,9 @@ pub(crate) async fn handle_resp_client(
                 resp::Request::ListPopBack(r) => {
                     resp::rpop(&mut client, &cache_name, &mut response_buf, r).await?
                 }
+                resp::Request::Ping(r) => {
+                    resp::ping(&mut client, &cache_name, &mut response_buf, r).await?
+                }
                 resp::Request::Set(r) => {
                     resp::set(&mut client, &cache_name, &mut response_buf, r).await?
                 }
