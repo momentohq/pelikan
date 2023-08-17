@@ -5,7 +5,6 @@
 use crate::protocol::resp::update_method_metrics;
 use crate::Error;
 use momento::SimpleCacheClient;
-use net::TCP_SEND_BYTE;
 use protocol_resp::{Ping, PING, PING_EX};
 
 const PONG_RSP: &[u8; 7] = b"+PONG\r\n";
