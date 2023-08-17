@@ -281,7 +281,7 @@ impl Request {
         Self::Set(Set::new(key, value, expire_time, mode, get_old))
     }
 
-    pub fn ping(key: &[u8]) -> Self {
+    pub fn ping() -> Self {
         Self::Ping(Ping::new())
     }
 }
