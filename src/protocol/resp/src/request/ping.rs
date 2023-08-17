@@ -5,11 +5,15 @@
 use super::*;
 use std::io::{Error, ErrorKind};
 
-#[derive(Debug, PartialEq, Eq)]
-#[allow(clippy::redundant_allocation)]
-pub struct PingRequest {}
+#[metric(name = "ping2")]
+pub static PING: Counter = Counter::new();
 
-impl TryFrom<Message> for PingRequest {
+#[metric(name = "ping_ex")]
+pub static PING_EX: Counter = Counter::new();
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Ping {}
+impl TryFrom<Message> for Ping {
     type Error = Error;
 
     fn try_from(other: Message) -> Result<Self, Error> {
@@ -24,21 +28,21 @@ impl TryFrom<Message> for PingRequest {
     }
 }
 
-impl PingRequest {
+impl Ping {
     pub fn new() -> Self {
         Self {}
     }
 }
 
-impl From<&PingRequest> for Message {
-    fn from(_: &PingRequest) -> Message {
+impl From<&Ping> for Message {
+    fn from(_: &Ping) -> Message {
         Message::Array(Array {
             inner: Some(vec![Message::BulkString(BulkString::new(b"Ping"))]),
         })
     }
 }
 
-impl Compose for PingRequest {
+impl Compose for Ping {
     fn compose(&self, buf: &mut dyn BufMut) -> usize {
         let message = Message::from(self);
         message.compose(buf)
@@ -54,7 +58,7 @@ mod tests {
         let parser = RequestParser::new();
         assert_eq!(
             parser.parse(b"PING\r\n").unwrap().into_inner(),
-            Request::Ping(PingRequest::new())
+            Request::Ping(Ping::new())
         );
     }
 }

@@ -32,6 +32,7 @@ mod lpop;
 mod lpush;
 mod lrange;
 mod ltrim;
+mod ping;
 mod rpop;
 mod rpush;
 mod sadd;
@@ -70,6 +71,7 @@ pub use hlen::*;
 pub use hmget::*;
 pub use hset::*;
 pub use hvals::*;
+pub use ping::*;
 pub use sadd::*;
 pub use set::*;
 
@@ -187,6 +189,7 @@ decl_request! {
         ListPush(ListPush) => "lpush",
         ListPushBack(ListPushBack) => "rpush",
         ListTrim(ListTrim) => "ltrim",
+        Ping(Ping) => "ping",
         Set(Set) => "set",
         SetAdd(SetAdd) => "sadd",
         SetRem(SetRem) => "srem",
@@ -276,6 +279,10 @@ impl Request {
         get_old: bool,
     ) -> Self {
         Self::Set(Set::new(key, value, expire_time, mode, get_old))
+    }
+
+    pub fn ping() -> Self {
+        Self::Ping(Ping::new())
     }
 }
 
