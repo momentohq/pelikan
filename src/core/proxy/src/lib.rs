@@ -11,9 +11,8 @@ extern crate logger;
 #[macro_use]
 extern crate metriken;
 
-use ::net::event::{Event, Source};
-use ::net::*;
 use admin::AdminBuilder;
+use clocksource::precise::Instant;
 use common::signal::Signal;
 use common::ssl::tls_acceptor;
 use config::proxy::*;
@@ -24,14 +23,14 @@ use crossbeam_channel::{bounded, Receiver, Sender};
 use entrystore::EntryStore;
 use logger::Drain;
 use metriken::*;
+use pelikan_net::event::{Event, Source};
+use pelikan_net::*;
 use protocol_common::{Compose, Execute, Parse};
 use session::{Buf, ServerSession, Session};
 use slab::Slab;
 use std::io::{Error, ErrorKind, Result};
 use std::sync::Arc;
 use switchboard::{Queues, Waker};
-
-type Instant = clocksource::Instant<clocksource::Nanoseconds<u64>>;
 
 mod backend;
 mod frontend;

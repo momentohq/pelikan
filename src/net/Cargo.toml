@@ -1,18 +1,26 @@
 [package]
-name = "net"
-description = "Networking abstractions for non-blocking event loops"
+name = "pelikan-net"
+description = "Pelikan project's networking abstractions for non-blocking event loops"
 authors = ["Brian Martin <brian@pelikan.io>"]
+version = "0.4.1"
 
-version = { workspace = true }
 edition = { workspace = true }
 homepage = { workspace = true }
 repository = { workspace = true }
 license = { workspace = true }
 
 [dependencies]
-boring = { workspace = true }
-boring-sys = { workspace = true }
-foreign-types-shared = { workspace = true }
+boring = { workspace = true, optional = true }
+boring-sys = { workspace = true, optional = true }
+foreign-types-shared_03 = { package = "foreign-types-shared", version = "0.3.1" }
+foreign-types-shared_01 = { package = "foreign-types-shared", version = "0.1.1" }
 libc = { workspace = true }
-metriken = { workspace = true }
+metriken = { workspace = true, optional = true }
 mio = { workspace = true, features = ["os-poll", "net"] }
+openssl = { workspace = true, optional = true }
+openssl-sys = { workspace = true, optional = true }
+
+[features]
+boringssl = ["boring", "boring-sys"]
+metrics = ["metriken"]
+openssl = ["dep:openssl", "openssl-sys", "openssl/vendored"]

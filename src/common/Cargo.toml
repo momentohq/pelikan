@@ -10,10 +10,12 @@ repository = { workspace = true }
 license = { workspace = true }
 
 [dependencies]
-boring = { workspace = true }
+boring = { workspace = true, optional = true }
 clocksource = { workspace = true }
-macros = { path = "../macros" }
 metriken = { workspace = true }
-net = { path = "../net" }
+pelikan-net = { workspace = true }
 ringlog = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+
+[features]
+boringssl = ["dep:boring", "pelikan-net/boringssl"]

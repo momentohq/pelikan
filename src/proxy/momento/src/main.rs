@@ -16,7 +16,7 @@ use logger::configure_logging;
 use logger::Drain;
 use metriken::*;
 use momento::*;
-use net::TCP_RECV_BYTE;
+use pelikan_net::TCP_RECV_BYTE;
 use protocol_admin::*;
 use session::*;
 use std::borrow::{Borrow, BorrowMut};
@@ -245,7 +245,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 metrics.push(format!("{:<31} counter", metric.name()));
             } else if any.downcast_ref::<Gauge>().is_some() {
                 metrics.push(format!("{:<31} gauge", metric.name()));
-            } else if any.downcast_ref::<Heatmap>().is_some() {
+            } else if any.downcast_ref::<AtomicHistogram>().is_some()
+                || any.downcast_ref::<RwLockHistogram>().is_some()
+            {
                 for (label, _) in PERCENTILES {
                     let name = format!("{}_{}", metric.name(), label);
                     metrics.push(format!("{name:<31} percentile"));
