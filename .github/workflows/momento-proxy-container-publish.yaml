@@ -12,6 +12,13 @@ jobs:
       DOCKER_PASSWORD: ${{secrets.DOCKER_PASSWORD}}
     steps:
       - uses: actions/checkout@v2
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Set release
         id: semrel
         uses: go-semantic-release/action@v1
@@ -20,14 +27,17 @@ jobs:
           allow-initial-development-versions: true
           force-bump-patch-version: true
 
-      - name: Docker login
-        run: |
-          docker login -u $DOCKER_USER -p $DOCKER_PASSWORD
-      - name: Build Docker image for momento-proxy with specific version tag
-        run: docker build --tag $DOCKER_USER/momento-proxy:${{ steps.semrel.outputs.version }} .
-      - name: Build Docker image for momento-proxy with latest tag
-        run: docker build --tag $DOCKER_USER/momento-proxy:latest .
-      - name: Docker push image with specific version
-        run: docker push $DOCKER_USER/momento-proxy:${{ steps.semrel.outputs.version }}
-      - name: Docker push image with latest version
-        run: docker push $DOCKER_USER/momento-proxy
+      - name: Log in to Docker Hub
+        uses: docker/login-action@f4ef78c080cd8ba55a85445d5b36e214a81df20a
+        with:
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker image
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: $DOCKER_USER/momento-proxy:latest, $DOCKER_USER/momento-proxy:${{ steps.semrel.outputs.version }}
+
