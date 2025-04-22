@@ -39,5 +39,5 @@ jobs:
         with:
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: $DOCKER_USER/momento-proxy:latest, $DOCKER_USER/momento-proxy:${{ steps.semrel.outputs.version }}
+          tags: gomomento/momento-proxy:latest, gomomento/momento-proxy:${{ steps.semrel.outputs.version }}
 
