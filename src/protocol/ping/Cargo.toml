@@ -14,15 +14,15 @@ path = "benches/ping.rs"
 harness = false
 
 [dependencies]
-common = { path = "../../common" }
-config = { path = "../../config" }
-logger = { path = "../../logger" }
+common = { path = "../../common", default-features = false }
+config = { path = "../../config", default-features = false }
+logger = { path = "../../logger", default-features = false }
 metriken = { workspace = true }
 protocol-common = { path = "../../protocol/common" }
 storage-types = { path = "../../storage/types" }
 
 [dev-dependencies]
-criterion = "0.3.4"
+criterion = "0.5.1"
 
 [features]
 default = []

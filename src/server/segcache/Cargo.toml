@@ -1,5 +1,5 @@
 [package]
-name = "segcache"
+name = "pelikan-segcache"
 description = "a Memcache protocol server with segment-structured storage"
 authors = ["Brian Martin <brian@pelikan.io>"]
 
@@ -46,7 +46,7 @@ entrystore = { path = "../../entrystore" }
 logger = { path = "../../logger" }
 metriken = { workspace = true }
 protocol-memcache = { path = "../../protocol/memcache" }
-server = { path = "../../core/server" }
+server = { path = "../../core/server", features = ["boringssl"] }
 
 [dev-dependencies]
-criterion = "0.3"
+criterion = "0.5.1"

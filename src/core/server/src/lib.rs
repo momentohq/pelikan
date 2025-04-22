@@ -91,8 +91,6 @@
 #[macro_use]
 extern crate logger;
 
-use ::net::event::{Event, Source};
-use ::net::*;
 use admin::AdminBuilder;
 use common::signal::Signal;
 use common::ssl::tls_acceptor;
@@ -103,6 +101,8 @@ use crossbeam_channel::{bounded, Sender};
 use entrystore::EntryStore;
 use logger::{Drain, Klog};
 use metriken::*;
+use pelikan_net::event::{Event, Source};
+use pelikan_net::*;
 use protocol_common::{Compose, Execute, Parse};
 use session::{Buf, ServerSession, Session};
 use slab::Slab;
@@ -118,8 +118,6 @@ use listener::ListenerBuilder;
 use workers::WorkersBuilder;
 
 pub use process::{Process, ProcessBuilder};
-
-type Instant = clocksource::Instant<clocksource::Nanoseconds<u64>>;
 
 // TODO(bmartin): this *should* be plenty safe, the queue should rarely ever be
 // full, and a single wakeup should drain at least one message and make room for

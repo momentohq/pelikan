@@ -4,8 +4,8 @@
 
 pub use boring::ssl::*;
 
-use net::TlsTcpAcceptor;
-use std::io::{Error, ErrorKind};
+use pelikan_net::TlsTcpAcceptor;
+use std::io::{Error as IoError, ErrorKind as IoErrorKind};
 
 pub trait TlsConfig {
     fn certificate_chain(&self) -> Option<String>;
@@ -21,14 +21,17 @@ pub trait TlsConfig {
 /// there were any issues during initialization. Otherwise, returns a
 /// `TlsTcpAcceptor` wrapped in an option, where the `None` variant indicates
 /// that TLS should not be used.
-pub fn tls_acceptor(config: &dyn TlsConfig) -> Result<Option<TlsTcpAcceptor>, std::io::Error> {
-    let mut builder = TlsTcpAcceptor::mozilla_intermediate_v5()?;
+pub fn tls_acceptor(config: &dyn TlsConfig) -> Result<Option<TlsTcpAcceptor>, IoError> {
+    let mut builder = TlsTcpAcceptor::builder();
 
     // we use xor here to check if we have an under-specified tls configuration
     if config.private_key().is_some()
         ^ (config.certificate_chain().is_some() || config.certificate().is_some())
     {
-        return Err(Error::new(ErrorKind::Other, "incomplete tls configuration"));
+        return Err(IoError::new(
+            IoErrorKind::Other,
+            "incomplete tls configuration",
+        ));
     }
 
     // load the private key
